@@ -1,0 +1,1 @@
+"""Woowangs Adventure backend application."""
