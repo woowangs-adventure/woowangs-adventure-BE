@@ -1,10 +1,11 @@
 import asyncio
 from collections import defaultdict
+from datetime import timezone
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .models import EdgeMessage, Pose2D, RobotState, utc_now
+from .models import EdgeMessage, MapState, Pose2D, RobotState, utc_now
 
 
 class RobotRegistry:
@@ -66,6 +67,13 @@ class RobotRegistry:
             else:
                 event_data = {"timestamp": now.isoformat()}
         await self.broadcast(robot_id, f"robot.{message.type}", event_data)
+
+    async def update_map(self, robot_id: str, map_state: MapState) -> None:
+        async with self._lock:
+            state = self._state(robot_id)
+            state.map = map_state
+            state.last_seen = map_state.timestamp.astimezone(timezone.utc)
+        await self.broadcast(robot_id, "map.updated", map_state.model_dump(mode="json"))
 
     async def add_dashboard(self, robot_id: str, socket: WebSocket) -> RobotState:
         async with self._lock:
