@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     edge_device_token: str = "change-this-device-token"
     map_source_robot_id: str = "TB3-01"
+    database_url: str = (
+        "postgresql+asyncpg://robot_local_dev:robot_local_dev_password"
+        "@127.0.0.1:5432/robot_inspection"
+    )
     data_dir: Path = Path("data")
     max_map_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     frontend_origins: list[str] = [
