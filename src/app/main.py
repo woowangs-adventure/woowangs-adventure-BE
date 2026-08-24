@@ -11,6 +11,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Response,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -20,12 +21,14 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from .config import Settings, get_settings
+from .database import Database, DatabaseConnection
 from .map_store import MapStore, validate_robot_id
 from .models import (
     EdgeMessage,
     HealthResponse,
     MapMetadataInput,
     MapState,
+    ReadinessResponse,
     RobotListResponse,
     RobotState,
 )
@@ -36,8 +39,12 @@ def _token_matches(expected: str, received: str | None) -> bool:
     return bool(received) and hmac.compare_digest(expected, received)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    database: DatabaseConnection | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
+    database = database or Database(settings.database_url)
     registry = RobotRegistry()
     map_store = MapStore(settings.data_dir, settings.max_map_bytes)
 
@@ -47,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for robot_id, map_state in map_store.load_all_metadata().items():
             await registry.restore_map(robot_id, map_state)
         yield
+        await database.close()
 
     app = FastAPI(
         title=settings.app_name,
@@ -56,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.registry = registry
     app.state.map_store = map_store
+    app.state.database = database
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.frontend_origins,
@@ -67,6 +76,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
         return HealthResponse(service=settings.app_name, environment=settings.environment)
+
+    @app.get("/ready", response_model=ReadinessResponse, tags=["system"])
+    async def readiness(response: Response) -> ReadinessResponse:
+        database_ready = await database.ping()
+        if not database_ready:
+            response.status_code = 503
+        return ReadinessResponse(
+            status="ready" if database_ready else "not_ready",
+            database="ok" if database_ready else "unavailable",
+        )
 
     @app.get(
         f"{settings.api_prefix}/robots",
