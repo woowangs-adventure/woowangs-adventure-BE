@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     edge_device_token: str = "change-this-device-token"
+    map_source_robot_id: str = "TB3-01"
     data_dir: Path = Path("data")
     max_map_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     frontend_origins: list[str] = [
