@@ -44,6 +44,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         map_store.prepare()
+        for robot_id, map_state in map_store.load_all_metadata().items():
+            await registry.restore_map(robot_id, map_state)
         yield
 
     app = FastAPI(
@@ -89,6 +91,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="robot not found")
         return state
 
+    @app.get(
+        f"{settings.api_prefix}/maps/current",
+        response_model=MapState,
+        tags=["slam"],
+    )
+    async def current_map() -> MapState:
+        state = await registry.get_state(settings.map_source_robot_id)
+        if state is None or state.map is None:
+            raise HTTPException(status_code=404, detail="current map not found")
+        return state.map
+
     @app.put(
         f"{settings.api_prefix}/robots/{{robot_id}}/map",
         response_model=MapState,
@@ -123,6 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             version=version,
             image_url=f"{settings.api_prefix}/robots/{robot_id}/map/latest?v={version}",
         )
+        map_store.save_metadata(robot_id, state)
         await registry.update_map(robot_id, state)
         return state
 

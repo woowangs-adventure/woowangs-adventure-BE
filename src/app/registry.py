@@ -75,6 +75,10 @@ class RobotRegistry:
             state.last_seen = map_state.timestamp.astimezone(timezone.utc)
         await self.broadcast(robot_id, "map.updated", map_state.model_dump(mode="json"))
 
+    async def restore_map(self, robot_id: str, map_state: MapState) -> None:
+        async with self._lock:
+            self._state(robot_id).map = map_state
+
     async def add_dashboard(self, robot_id: str, socket: WebSocket) -> RobotState:
         async with self._lock:
             self._dashboards[robot_id].add(socket)
