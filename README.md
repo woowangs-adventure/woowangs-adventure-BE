@@ -8,6 +8,7 @@ FastAPI 백엔드입니다. ROS 2와 직접 통신하지 않으며, 로봇과 �
 
 - 장치 토큰 기반 Edge Agent 인증
 - SLAM 지도 PNG 업로드 및 최신 지도 조회
+- 지도 메타데이터 로컬 영속화 및 서버 재시작 시 복원
 - 로봇 위치, 상태, heartbeat 실시간 수신
 - 대시보드 WebSocket 실시간 이벤트 전파
 - Swagger API 문서
@@ -47,6 +48,7 @@ cp .env.example .env
 ```env
 WOOWANGS_ENVIRONMENT=development
 WOOWANGS_EDGE_DEVICE_TOKEN=replace-with-a-random-device-token
+WOOWANGS_MAP_SOURCE_ROBOT_ID=TB3-01
 WOOWANGS_DATA_DIR=data
 WOOWANGS_FRONTEND_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
 ```
@@ -92,6 +94,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - Health: `http://127.0.0.1:8000/health`
 - Swagger: `http://127.0.0.1:8000/docs`
 - 로봇 상태: `http://127.0.0.1:8000/api/v1/robots/TB3-01/state`
+- 현재 SLAM 지도 정보: `http://127.0.0.1:8000/api/v1/maps/current`
 - 최신 지도: `http://127.0.0.1:8000/api/v1/robots/TB3-01/map/latest`
 
 다른 노트북에서 접속할 때는 `127.0.0.1` 대신 백엔드가 실행 중인 노트북의
