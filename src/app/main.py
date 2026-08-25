@@ -1,9 +1,9 @@
+import hashlib
 import hmac
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
-from uuid import uuid4
 
 from fastapi import (
     FastAPI,
@@ -32,6 +32,7 @@ from .models import (
     RobotListResponse,
     RobotState,
 )
+from .persistence import NullPersistence, SqlAlchemyPersistence, StatePersistence
 from .registry import RobotRegistry
 
 
@@ -42,10 +43,16 @@ def _token_matches(expected: str, received: str | None) -> bool:
 def create_app(
     settings: Settings | None = None,
     database: DatabaseConnection | None = None,
+    persistence: StatePersistence | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     database = database or Database(settings.database_url)
-    registry = RobotRegistry()
+    persistence = persistence or (
+        NullPersistence()
+        if settings.environment == "test"
+        else SqlAlchemyPersistence(database, settings.api_prefix)
+    )
+    registry = RobotRegistry(persistence)
     map_store = MapStore(settings.data_dir, settings.max_map_bytes)
 
     @asynccontextmanager
@@ -53,6 +60,13 @@ def create_app(
         map_store.prepare()
         for robot_id, map_state in map_store.load_all_metadata().items():
             await registry.restore_map(robot_id, map_state)
+            await persistence.save_map(
+                robot_id,
+                map_state,
+                map_store.latest_path(robot_id),
+            )
+        for restored in await persistence.load_states():
+            await registry.restore_state(restored)
         yield
         await database.close()
 
@@ -65,6 +79,7 @@ def create_app(
     app.state.registry = registry
     app.state.map_store = map_store
     app.state.database = database
+    app.state.persistence = persistence
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.frontend_origins,
@@ -146,16 +161,17 @@ def create_app(
             raise HTTPException(status_code=415, detail="map image must use image/png")
         content = await image.read(settings.max_map_bytes + 1)
         try:
-            map_store.save_png(robot_id, content)
+            map_path = map_store.save_png(robot_id, content)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        version = uuid4().hex
+        version = hashlib.sha256(content).hexdigest()
         state = MapState(
             **parsed.model_dump(),
             version=version,
             image_url=f"{settings.api_prefix}/robots/{robot_id}/map/latest?v={version}",
         )
         map_store.save_metadata(robot_id, state)
+        await persistence.save_map(robot_id, state, map_path)
         await registry.update_map(robot_id, state)
         return state
 
@@ -226,7 +242,11 @@ def create_app(
             while True:
                 message = await websocket.receive_json()
                 if message.get("type") == "ping":
-                    await websocket.send_json({"type": "pong", "robot_id": robot_id, "data": {}})
+                    await websocket.send_json({
+                        "type": "pong",
+                        "robot_id": robot_id,
+                        "data": {},
+                    })
         except WebSocketDisconnect:
             pass
         finally:

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def utc_now() -> datetime:
@@ -13,6 +13,7 @@ class Pose2D(BaseModel):
     y: float
     yaw: float
     frame_id: str = "map"
+    map_version: str | None = None
     timestamp: datetime = Field(default_factory=utc_now)
 
 
@@ -37,13 +38,27 @@ class EdgeMessage(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class RobotStatus(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ros_connected: bool = False
+    map_available: bool = False
+    tf_available: bool = False
+    map_frame: str = "map"
+    base_frame: str = "base_footprint"
+    localization_available: bool = False
+    localization_method: Literal["amcl", "slam_toolbox", "unknown", "none"] = "unknown"
+    map_version: str | None = None
+    edge: dict[str, Any] | None = None
+
+
 class RobotState(BaseModel):
     robot_id: str
     online: bool = False
     last_seen: datetime | None = None
     pose: Pose2D | None = None
     map: MapState | None = None
-    status: dict[str, Any] = Field(default_factory=dict)
+    status: RobotStatus = Field(default_factory=RobotStatus)
 
 
 class RobotListResponse(BaseModel):

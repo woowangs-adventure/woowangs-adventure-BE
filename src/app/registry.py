@@ -5,17 +5,34 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .models import EdgeMessage, MapState, Pose2D, RobotState, utc_now
+from .models import (
+    EdgeMessage,
+    MapState,
+    Pose2D,
+    RobotState,
+    RobotStatus,
+    utc_now,
+)
+from .persistence import StatePersistence
 
 
 class RobotRegistry:
-    def __init__(self) -> None:
+    def __init__(self, persistence: StatePersistence) -> None:
+        self._persistence = persistence
         self._states: dict[str, RobotState] = {}
         self._dashboards: dict[str, set[WebSocket]] = defaultdict(set)
         self._lock = asyncio.Lock()
 
     def _state(self, robot_id: str) -> RobotState:
         return self._states.setdefault(robot_id, RobotState(robot_id=robot_id))
+
+    async def restore_state(self, restored: RobotState) -> None:
+        async with self._lock:
+            current = self._state(restored.robot_id)
+            restored.online = False
+            if current.map is not None and restored.map is None:
+                restored.map = current.map
+            self._states[restored.robot_id] = restored.model_copy(deep=True)
 
     async def list_states(self) -> list[RobotState]:
         async with self._lock:
@@ -32,6 +49,7 @@ class RobotRegistry:
             state.online = True
             state.last_seen = utc_now()
             snapshot = state.model_copy(deep=True)
+        await self._persistence.save_robot(snapshot)
         await self.broadcast(robot_id, "robot.connection", {
             "online": True,
             "last_seen": snapshot.last_seen.isoformat(),
@@ -42,15 +60,15 @@ class RobotRegistry:
             state = self._state(robot_id)
             state.online = False
             state.last_seen = utc_now()
-            last_seen = state.last_seen
+            snapshot = state.model_copy(deep=True)
+        await self._persistence.save_robot(snapshot)
         await self.broadcast(robot_id, "robot.connection", {
             "online": False,
-            "last_seen": last_seen.isoformat(),
+            "last_seen": snapshot.last_seen.isoformat(),
         })
 
     async def handle_edge_message(self, robot_id: str, message: EdgeMessage) -> None:
         now = utc_now()
-        event_data: dict[str, Any]
         async with self._lock:
             state = self._state(robot_id)
             state.online = True
@@ -59,13 +77,17 @@ class RobotRegistry:
                 state.pose = Pose2D.model_validate(message.data)
                 event_data = state.pose.model_dump(mode="json")
             elif message.type == "status":
-                state.status.update(message.data)
-                event_data = dict(state.status)
+                merged = state.status.model_dump(mode="python")
+                merged.update(message.data)
+                state.status = RobotStatus.model_validate(merged)
+                event_data = state.status.model_dump(mode="json")
             elif message.type == "hello":
-                state.status.update({"edge": message.data})
+                state.status.edge = dict(message.data)
                 event_data = message.data
             else:
                 event_data = {"timestamp": now.isoformat()}
+            snapshot = state.model_copy(deep=True)
+        await self._persistence.save_robot(snapshot)
         await self.broadcast(robot_id, f"robot.{message.type}", event_data)
 
     async def update_map(self, robot_id: str, map_state: MapState) -> None:
@@ -73,6 +95,8 @@ class RobotRegistry:
             state = self._state(robot_id)
             state.map = map_state
             state.last_seen = map_state.timestamp.astimezone(timezone.utc)
+            snapshot = state.model_copy(deep=True)
+        await self._persistence.save_robot(snapshot)
         await self.broadcast(robot_id, "map.updated", map_state.model_dump(mode="json"))
 
     async def restore_map(self, robot_id: str, map_state: MapState) -> None:
