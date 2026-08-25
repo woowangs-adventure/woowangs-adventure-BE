@@ -24,6 +24,8 @@ from .config import Settings, get_settings
 from .database import Database, DatabaseConnection
 from .map_store import MapStore, validate_robot_id
 from .models import (
+    ControlCapabilities,
+    DashboardMessage,
     EdgeMessage,
     HealthResponse,
     MapMetadataInput,
@@ -31,9 +33,10 @@ from .models import (
     ReadinessResponse,
     RobotListResponse,
     RobotState,
+    VelocityCommand,
 )
 from .persistence import NullPersistence, SqlAlchemyPersistence, StatePersistence
-from .registry import RobotRegistry
+from .registry import ControlUnavailableError, RobotRegistry
 
 
 def _token_matches(expected: str, received: str | None) -> bool:
@@ -100,6 +103,17 @@ def create_app(
         return ReadinessResponse(
             status="ready" if database_ready else "not_ready",
             database="ok" if database_ready else "unavailable",
+        )
+
+    @app.get(
+        f"{settings.api_prefix}/control/capabilities",
+        response_model=ControlCapabilities,
+        tags=["control"],
+    )
+    async def control_capabilities() -> ControlCapabilities:
+        return ControlCapabilities(
+            enabled=settings.control_enabled,
+            ttl_ms=settings.control_command_ttl_ms,
         )
 
     @app.get(
@@ -206,23 +220,24 @@ def create_app(
             await websocket.close(code=1008, reason="invalid device token")
             return
         await websocket.accept()
-        await registry.connect_edge(robot_id)
+        await registry.connect_edge(robot_id, websocket)
         try:
             while True:
                 try:
                     message = EdgeMessage.model_validate(await websocket.receive_json())
                 except ValidationError as exc:
-                    await websocket.send_json({
-                        "type": "error",
-                        "data": {"message": "invalid edge message", "details": exc.errors()},
-                    })
+                    await registry.send_edge_error(
+                        robot_id,
+                        "invalid edge message",
+                        exc.errors(),
+                    )
                     continue
                 await registry.handle_edge_message(robot_id, message)
-                await websocket.send_json({"type": "ack", "data": {"event": message.type}})
+                await registry.send_edge_ack(robot_id, message.type)
         except WebSocketDisconnect:
             pass
         finally:
-            await registry.disconnect_edge(robot_id)
+            await registry.disconnect_edge(robot_id, websocket)
 
     @app.websocket("/ws/dashboard/{robot_id}")
     async def dashboard_socket(websocket: WebSocket, robot_id: str) -> None:
@@ -233,19 +248,55 @@ def create_app(
             return
         await websocket.accept()
         snapshot = await registry.add_dashboard(robot_id, websocket)
-        await websocket.send_json({
-            "type": "state.snapshot",
-            "robot_id": robot_id,
-            "data": snapshot.model_dump(mode="json"),
-        })
+        await registry.send_dashboard(
+            websocket,
+            "state.snapshot",
+            robot_id,
+            snapshot.model_dump(mode="json"),
+        )
         try:
             while True:
-                message = await websocket.receive_json()
-                if message.get("type") == "ping":
-                    await websocket.send_json({
-                        "type": "pong",
-                        "robot_id": robot_id,
-                        "data": {},
+                try:
+                    message = DashboardMessage.model_validate(await websocket.receive_json())
+                    if message.type == "ping":
+                        await registry.send_dashboard(websocket, "pong", robot_id, {})
+                        continue
+                    if not settings.control_enabled:
+                        raise ControlUnavailableError("robot control is disabled by server")
+                    if message.type == "control.acquire":
+                        await registry.acquire_control(robot_id, websocket)
+                        await registry.send_dashboard(websocket, "control.acquired", robot_id, {})
+                    elif message.type == "control.velocity":
+                        command = VelocityCommand.model_validate(message.data)
+                        routed = await registry.route_velocity(
+                            robot_id,
+                            websocket,
+                            linear=command.linear,
+                            angular=command.angular,
+                            ttl_ms=command.ttl_ms,
+                        )
+                        await registry.send_dashboard(
+                            websocket,
+                            "control.sent",
+                            robot_id,
+                            routed.model_dump(mode="json"),
+                        )
+                    elif message.type == "control.stop":
+                        stopped = await registry.stop_control(robot_id, websocket)
+                        await registry.send_dashboard(
+                            websocket,
+                            "control.sent",
+                            robot_id,
+                            stopped.model_dump(mode="json"),
+                        )
+                    elif message.type == "control.release":
+                        await registry.release_control(robot_id, websocket)
+                        await registry.send_dashboard(websocket, "control.released", robot_id, {})
+                except (ValidationError, ControlUnavailableError) as exc:
+                    details = exc.errors() if isinstance(exc, ValidationError) else None
+                    await registry.send_dashboard(websocket, "error", robot_id, {
+                        "message": str(exc),
+                        "details": details,
                     })
         except WebSocketDisconnect:
             pass

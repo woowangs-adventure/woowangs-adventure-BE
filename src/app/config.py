@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     edge_device_token: str = "change-this-device-token"
     map_source_robot_id: str = "TB3-01"
+    control_enabled: bool = False
+    control_command_ttl_ms: int = Field(default=300, ge=100, le=500)
     database_url: str = (
         "postgresql+asyncpg://robot_local_dev:robot_local_dev_password"
         "@127.0.0.1:5432/robot_inspection"

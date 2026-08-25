@@ -34,7 +34,7 @@ class MapState(MapMetadataInput):
 
 
 class EdgeMessage(BaseModel):
-    type: Literal["hello", "heartbeat", "pose", "status"]
+    type: Literal["hello", "heartbeat", "pose", "status", "control.ack"]
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -59,6 +59,37 @@ class RobotState(BaseModel):
     pose: Pose2D | None = None
     map: MapState | None = None
     status: RobotStatus = Field(default_factory=RobotStatus)
+
+
+class DashboardMessage(BaseModel):
+    type: Literal[
+        "ping",
+        "control.acquire",
+        "control.velocity",
+        "control.stop",
+        "control.release",
+    ]
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class VelocityCommand(BaseModel):
+    linear: float = Field(ge=-1.0, le=1.0)
+    angular: float = Field(ge=-1.0, le=1.0)
+    ttl_ms: int = Field(default=300, ge=100, le=500)
+
+
+class EdgeControlCommand(VelocityCommand):
+    command_id: str
+    issued_at: datetime = Field(default_factory=utc_now)
+
+
+class ControlCapabilities(BaseModel):
+    enabled: bool
+    velocity_scale: Literal["normalized"] = "normalized"
+    ttl_ms: int
+    supported_commands: list[str] = Field(
+        default_factory=lambda: ["control.velocity", "control.stop"]
+    )
 
 
 class RobotListResponse(BaseModel):
