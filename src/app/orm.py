@@ -69,3 +69,28 @@ class MapRecord(Base):
         server_default=func.now(),
     )
 
+
+class VideoRecord(Base):
+    __tablename__ = "videos"
+
+    robot_id: Mapped[str] = mapped_column(
+        ForeignKey("robots.robot_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

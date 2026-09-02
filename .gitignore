@@ -11,3 +11,5 @@ build/
 *.egg-info/
 data/
 /WORKLOG.md
+/test_video.*
+/test_vedio.*

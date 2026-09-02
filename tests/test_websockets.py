@@ -93,3 +93,39 @@ def test_edge_rejects_wrong_token(client):
     assert error.value.code == 1008
 
 
+def test_webrtc_signaling_relays_offer_and_answer(client):
+    with client.websocket_connect("/ws/webrtc/MINI-01/viewer") as viewer:
+        first = viewer.receive_json()
+        assert first["type"] == "webrtc.peer"
+        assert first["data"] == {"role": "publisher", "online": False}
+
+        with client.websocket_connect(
+            "/ws/webrtc/MINI-01/publisher?token=test-token"
+        ) as publisher:
+            assert publisher.receive_json()["data"] == {"role": "viewer", "online": True}
+            assert viewer.receive_json()["data"] == {"role": "publisher", "online": True}
+
+            viewer.send_json({
+                "type": "webrtc.offer",
+                "data": {"sdp": {"type": "offer", "sdp": "viewer-sdp"}},
+            })
+            offer = publisher.receive_json()
+            assert offer["type"] == "webrtc.offer"
+            assert offer["data"]["sdp"]["sdp"] == "viewer-sdp"
+
+            publisher.send_json({
+                "type": "webrtc.answer",
+                "data": {"sdp": {"type": "answer", "sdp": "publisher-sdp"}},
+            })
+            answer = viewer.receive_json()
+            assert answer["type"] == "webrtc.answer"
+            assert answer["data"]["sdp"]["sdp"] == "publisher-sdp"
+
+
+def test_webrtc_publisher_requires_device_token(client):
+    with (
+        pytest.raises(WebSocketDisconnect) as error,
+        client.websocket_connect("/ws/webrtc/MINI-01/publisher?token=wrong"),
+    ):
+        pass
+    assert error.value.code == 1008

@@ -33,6 +33,17 @@ class MapState(MapMetadataInput):
     image_url: str
 
 
+class VideoState(BaseModel):
+    robot_id: str
+    mode: Literal["recorded"] = "recorded"
+    content_type: Literal["video/mp4", "video/webm"]
+    original_filename: str
+    size_bytes: int = Field(gt=0)
+    version: str
+    uploaded_at: datetime = Field(default_factory=utc_now)
+    content_url: str
+
+
 class EdgeMessage(BaseModel):
     type: Literal["hello", "heartbeat", "pose", "status", "control.ack"]
     data: dict[str, Any] = Field(default_factory=dict)
