@@ -6,8 +6,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from .database import DatabaseConnection
-from .models import MapState, Pose2D, RobotState, RobotStatus, utc_now
-from .orm import MapRecord, RobotRecord
+from .models import MapState, Pose2D, RobotState, RobotStatus, VideoState, utc_now
+from .orm import MapRecord, RobotRecord, VideoRecord
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,9 @@ class StatePersistence(Protocol):
 
     async def save_map(self, robot_id: str, state: MapState, local_path: Path) -> None: ...
 
+    async def save_video(self, state: VideoState, local_path: Path) -> None: ...
+
+
 class NullPersistence:
     async def load_states(self) -> list[RobotState]:
         return []
@@ -28,6 +31,10 @@ class NullPersistence:
 
     async def save_map(self, robot_id: str, state: MapState, local_path: Path) -> None:
         return None
+
+    async def save_video(self, state: VideoState, local_path: Path) -> None:
+        return None
+
 
 class SqlAlchemyPersistence:
     def __init__(self, database: DatabaseConnection, api_prefix: str) -> None:
@@ -137,6 +144,28 @@ class SqlAlchemyPersistence:
                 await session.commit()
         except (OSError, SQLAlchemyError) as exc:
             logger.warning("Could not persist map %s for %s: %s", state.version, robot_id, exc)
+
+    async def save_video(self, state: VideoState, local_path: Path) -> None:
+        try:
+            async with self._database.session() as session:
+                robot = await session.get(RobotRecord, state.robot_id)
+                if robot is None:
+                    robot = RobotRecord(robot_id=state.robot_id)
+                    session.add(robot)
+                    await session.flush()
+                record = await session.get(VideoRecord, state.robot_id)
+                if record is None:
+                    record = VideoRecord(robot_id=state.robot_id)
+                    session.add(record)
+                record.version = state.version
+                record.content_type = state.content_type
+                record.original_filename = state.original_filename
+                record.size_bytes = state.size_bytes
+                record.local_path = str(local_path)
+                record.uploaded_at = state.uploaded_at
+                await session.commit()
+        except (OSError, SQLAlchemyError) as exc:
+            logger.warning("Could not persist video %s for %s: %s", state.version, state.robot_id, exc)
 
     def _map_state(self, record: MapRecord) -> MapState:
         return MapState(

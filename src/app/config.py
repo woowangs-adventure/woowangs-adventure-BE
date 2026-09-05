@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     )
     data_dir: Path = Path("data")
     max_map_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
+    max_video_bytes: int = Field(default=500 * 1024 * 1024, ge=1024)
     frontend_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

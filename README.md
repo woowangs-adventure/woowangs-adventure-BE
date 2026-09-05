@@ -13,6 +13,7 @@ FastAPI 백엔드입니다. ROS 2와 직접 통신하지 않으며, 로봇과 �
 - 대시보드 WebSocket 실시간 이벤트 전파
 - PostgreSQL ORM 영속화 및 Alembic 스키마 마이그레이션
 - 단일 조종자 lease와 만료 시간 기반 로봇 속도 명령 중계
+- MP4/WebM 저장 영상 업로드·재생과 WebRTC 시그널링 중계
 - Swagger API 문서
 - 자동 테스트
 
@@ -56,6 +57,7 @@ WOOWANGS_MAP_SOURCE_ROBOT_ID=TB3-01
 WOOWANGS_CONTROL_ENABLED=false
 WOOWANGS_CONTROL_COMMAND_TTL_MS=300
 WOOWANGS_DATA_DIR=data
+WOOWANGS_MAX_VIDEO_BYTES=524288000
 WOOWANGS_FRONTEND_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
 
 POSTGRES_DB=robot_inspection
@@ -95,9 +97,9 @@ python -m alembic upgrade head
 python -m alembic current
 ```
 
-`robots` 테이블에는 최신 pose, localization 상태와 지도 버전을 저장하고, `maps`
-테이블에는 지도 메타데이터와 로컬 파일 경로를 저장합니다. 새 환경에서는 FastAPI를
-실행하기 전에 반드시 `python -m alembic upgrade head`를 실행합니다.
+`robots` 테이블에는 최신 pose, localization 상태와 지도 버전을 저장하고, `maps`와
+`videos` 테이블에는 지도·영상 메타데이터와 로컬 파일 경로를 저장합니다. 새 환경에서는
+FastAPI를 실행하기 전에 반드시 `python -m alembic upgrade head`를 실행합니다.
 
 컨테이너만 중지하거나 다시 실행할 때는 다음 명령을 사용합니다.
 
@@ -165,6 +167,41 @@ data/maps/<robot_id>/metadata.json
 버전(SHA-256), 좌표 메타데이터와 로컬 경로만 저장합니다. 서버를 여러 대로 확장하는
 시점에는 공유 볼륨 같은 별도 파일 저장 전략이 필요합니다.
 
+## 카메라 영상
+
+실시간 송신기가 준비되기 전에는 MP4 또는 WebM 파일을 백엔드에 업로드해 대시보드에서
+재생할 수 있습니다. 파일은 S3가 아니라 다음 로컬 경로에 저장하고 PostgreSQL에는
+메타데이터와 로컬 경로만 저장합니다.
+
+```text
+data/videos/<robot_id>/latest.mp4  # 또는 latest.webm
+data/videos/<robot_id>/metadata.json
+```
+
+미니로봇 저장 영상을 등록하는 예시는 다음과 같습니다.
+
+```bash
+curl -X PUT "http://127.0.0.1:8000/api/v1/robots/MINI-01/video" \
+  -H "X-Device-Token: replace-with-a-random-device-token" \
+  -F "video=@./inspection.mp4;type=video/mp4"
+```
+
+`curl` 대신 Swagger에서 테스트할 수도 있습니다.
+
+1. `http://127.0.0.1:8000/docs`에 접속합니다.
+2. 우측 상단 `Authorize`를 누르고 `.env`의 `WOOWANGS_EDGE_DEVICE_TOKEN` 값을 입력합니다.
+3. `video`의 `PUT /api/v1/robots/{robot_id}/video`에서 `Try it out`을 누릅니다.
+4. `robot_id`에 `MINI-01`을 입력하고 파일 선택에서 로컬 MP4 또는 WebM을 고릅니다.
+5. `Execute`를 누른 뒤 반환된 `content_url`을 열어 재생을 확인합니다.
+
+프로젝트 루트의 로컬 테스트 영상은 Git에 포함하지 않습니다. 현재 테스트 파일명이
+`test_vedio.mp4`라면 그대로 파일 선택 창에서 고르면 됩니다.
+
+프론트엔드의 `VITE_CAMERA_MODE=auto`는 WebRTC 실시간 영상을 우선하고 송신자가 없으면
+위 저장 영상을 사용합니다. `/ws/webrtc/<robot_id>/publisher`와 `viewer`는 SDP와 ICE
+신호만 중계하며 영상 데이터는 FastAPI를 통과하지 않습니다. 로컬 Wi-Fi 밖의 클라우드
+환경에서는 별도 TURN 서버와 HTTPS/WSS 설정이 필요합니다.
+
 ## 웹 수동 조작
 
 개발 중 의도치 않은 이동을 막기 위해 기본값은 비활성화입니다. 실기 테스트 때만
@@ -185,10 +222,12 @@ WOOWANGS_CONTROL_COMMAND_TTL_MS=300
 - Health: `http://127.0.0.1:8000/health`
 - Readiness: `http://127.0.0.1:8000/ready`
 - Swagger: `http://127.0.0.1:8000/docs`
+- OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 - 로봇 상태: `http://127.0.0.1:8000/api/v1/robots/TB3-01/state`
 - 현재 SLAM 지도 정보: `http://127.0.0.1:8000/api/v1/maps/current`
 - 최신 지도: `http://127.0.0.1:8000/api/v1/robots/TB3-01/map/latest`
 - 조작 지원 상태: `http://127.0.0.1:8000/api/v1/control/capabilities`
+- 미니로봇 저장 영상 정보: `http://127.0.0.1:8000/api/v1/robots/MINI-01/video`
 
 다른 노트북에서 접속할 때는 `127.0.0.1` 대신 백엔드가 실행 중인 노트북의
 로컬 IP를 사용합니다.

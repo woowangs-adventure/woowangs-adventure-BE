@@ -2,7 +2,7 @@ from app.orm import Base
 
 
 def test_robot_and_map_tables_define_persistent_state():
-    assert set(Base.metadata.tables) == {"robots", "maps"}
+    assert set(Base.metadata.tables) == {"robots", "maps", "videos"}
 
     robots = Base.metadata.tables["robots"]
     assert {
@@ -25,3 +25,13 @@ def test_robot_and_map_tables_define_persistent_state():
         "local_path",
         "is_current",
     }.issubset(maps.columns.keys())
+
+    videos = Base.metadata.tables["videos"]
+    assert {
+        "robot_id",
+        "version",
+        "content_type",
+        "size_bytes",
+        "local_path",
+        "uploaded_at",
+    }.issubset(videos.columns.keys())
