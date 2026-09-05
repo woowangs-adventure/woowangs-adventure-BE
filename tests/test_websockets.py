@@ -15,12 +15,73 @@ def test_edge_pose_is_broadcast_to_dashboard(client):
 
             edge.send_json({
                 "type": "pose",
-                "data": {"x": 0.3, "y": 1.35, "yaw": 0.55},
+                "data": {
+                    "x": 0.3,
+                    "y": 1.35,
+                    "yaw": 0.55,
+                    "map_version": "map-sha256",
+                },
             })
             event = dashboard.receive_json()
             assert event["type"] == "robot.pose"
             assert event["data"]["x"] == 0.3
             assert edge.receive_json()["type"] == "ack"
+
+
+def test_localization_status_is_explicit(client):
+    with client.websocket_connect("/ws/edge/TB3-01?token=test-token") as edge:
+        edge.send_json({
+            "type": "status",
+            "data": {
+                "ros_connected": True,
+                "tf_available": True,
+                "localization_available": True,
+                "localization_method": "amcl",
+                "map_version": "map-sha256",
+            },
+        })
+        assert edge.receive_json()["type"] == "ack"
+
+        response = client.get("/api/v1/robots/TB3-01/state")
+        assert response.status_code == 200
+        status = response.json()["status"]
+        assert status["localization_available"] is True
+        assert status["localization_method"] == "amcl"
+        assert status["map_version"] == "map-sha256"
+
+
+def test_dashboard_velocity_command_is_routed_to_edge(client):
+    capabilities = client.get("/api/v1/control/capabilities")
+    assert capabilities.json()["enabled"] is True
+
+    with client.websocket_connect("/ws/dashboard/TB3-01") as dashboard:
+        dashboard.receive_json()
+        with client.websocket_connect("/ws/edge/TB3-01?token=test-token") as edge:
+            assert dashboard.receive_json()["type"] == "robot.connection"
+
+            dashboard.send_json({"type": "control.acquire", "data": {}})
+            assert dashboard.receive_json()["type"] == "control.acquired"
+
+            dashboard.send_json({
+                "type": "control.velocity",
+                "data": {"linear": 0.6, "angular": -0.2, "ttl_ms": 300},
+            })
+            command = edge.receive_json()
+            assert command["type"] == "command.velocity"
+            assert command["data"]["linear"] == 0.6
+            assert command["data"]["angular"] == -0.2
+            assert dashboard.receive_json()["type"] == "control.sent"
+
+            edge.send_json({
+                "type": "control.ack",
+                "data": {"command_id": command["data"]["command_id"], "applied": True},
+            })
+            assert dashboard.receive_json()["type"] == "robot.control_ack"
+            assert edge.receive_json()["type"] == "ack"
+
+            dashboard.send_json({"type": "control.release", "data": {}})
+            assert edge.receive_json()["type"] == "command.stop"
+            assert dashboard.receive_json()["type"] == "control.released"
 
 
 def test_edge_rejects_wrong_token(client):
@@ -30,3 +91,5 @@ def test_edge_rejects_wrong_token(client):
     ):
         pass
     assert error.value.code == 1008
+
+

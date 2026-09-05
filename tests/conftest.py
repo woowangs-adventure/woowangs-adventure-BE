@@ -15,6 +15,7 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         environment="test",
         edge_device_token="test-token",
+        control_enabled=True,
         data_dir=tmp_path,
     )
 
