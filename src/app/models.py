@@ -78,6 +78,7 @@ class DashboardMessage(BaseModel):
         "control.acquire",
         "control.velocity",
         "control.stop",
+        "control.light",
         "control.release",
     ]
     data: dict[str, Any] = Field(default_factory=dict)
@@ -87,6 +88,16 @@ class VelocityCommand(BaseModel):
     linear: float = Field(ge=-1.0, le=1.0)
     angular: float = Field(ge=-1.0, le=1.0)
     ttl_ms: int = Field(default=300, ge=100, le=500)
+
+
+class LightCommand(BaseModel):
+    on: bool = Field(strict=True)
+
+
+class EdgeLightCommand(LightCommand):
+    command_id: str
+    issued_at: datetime = Field(default_factory=utc_now)
+    ttl_ms: int = 1000
 
 
 class EdgeControlCommand(VelocityCommand):
@@ -99,7 +110,7 @@ class ControlCapabilities(BaseModel):
     velocity_scale: Literal["normalized"] = "normalized"
     ttl_ms: int
     supported_commands: list[str] = Field(
-        default_factory=lambda: ["control.velocity", "control.stop"]
+        default_factory=lambda: ["control.velocity", "control.stop", "control.light"]
     )
 
 

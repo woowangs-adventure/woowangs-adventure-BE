@@ -29,6 +29,7 @@ from .models import (
     DashboardMessage,
     EdgeMessage,
     HealthResponse,
+    LightCommand,
     MapMetadataInput,
     MapState,
     ReadinessResponse,
@@ -423,6 +424,15 @@ def create_app(
                             "control.sent",
                             robot_id,
                             routed.model_dump(mode="json"),
+                        )
+                    elif message.type == "control.light":
+                        light = LightCommand.model_validate(message.data)
+                        routed_light = await registry.route_light(
+                            robot_id, websocket, on=light.on,
+                        )
+                        await registry.send_dashboard(
+                            websocket, "control.sent", robot_id,
+                            routed_light.model_dump(mode="json"),
                         )
                     elif message.type == "control.stop":
                         stopped = await registry.stop_control(robot_id, websocket)
