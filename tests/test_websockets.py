@@ -129,3 +129,46 @@ def test_webrtc_publisher_requires_device_token(client):
     ):
         pass
     assert error.value.code == 1008
+
+
+def test_mini_light_requires_owner_and_reports_state(client):
+    with client.websocket_connect('/ws/dashboard/MINI-01') as dashboard:
+        dashboard.receive_json()
+        with client.websocket_connect('/ws/edge/MINI-01?token=test-token') as edge:
+            dashboard.receive_json()
+            edge.send_json({'type': 'status', 'data': {
+                'headlight_available': True, 'headlight_on': False,
+            }})
+            assert edge.receive_json()['type'] == 'ack'
+            dashboard.receive_json()
+            dashboard.send_json({'type': 'control.light', 'data': {'on': True}})
+            assert dashboard.receive_json()['type'] == 'error'
+            dashboard.send_json({'type': 'control.acquire'})
+            assert dashboard.receive_json()['type'] == 'control.acquired'
+            dashboard.send_json({'type': 'control.light', 'data': {'on': 'false'}})
+            assert dashboard.receive_json()['type'] == 'error'
+            dashboard.send_json({'type': 'control.light', 'data': {'on': True}})
+            command = edge.receive_json()
+            assert command['type'] == 'command.light'
+            assert command['data']['on'] is True
+            assert dashboard.receive_json()['type'] == 'control.sent'
+            with client.websocket_connect('/ws/dashboard/MINI-01') as other:
+                other.receive_json()
+                other.send_json({'type': 'control.acquire'})
+                assert other.receive_json()['type'] == 'error'
+                other.send_json({'type': 'control.light', 'data': {'on': False}})
+                assert other.receive_json()['type'] == 'error'
+            edge.send_json({'type': 'status', 'data': {'headlight_on': True}})
+            assert edge.receive_json()['type'] == 'ack'
+            assert dashboard.receive_json()['data']['headlight_on'] is True
+
+
+def test_turtlebot_without_light_capability_rejects_light(client):
+    with client.websocket_connect('/ws/dashboard/TB3-01') as dashboard:
+        dashboard.receive_json()
+        with client.websocket_connect('/ws/edge/TB3-01?token=test-token'):
+            dashboard.receive_json()
+            dashboard.send_json({'type': 'control.acquire'})
+            assert dashboard.receive_json()['type'] == 'control.acquired'
+            dashboard.send_json({'type': 'control.light', 'data': {'on': True}})
+            assert dashboard.receive_json()['type'] == 'error'

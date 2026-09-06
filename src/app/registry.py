@@ -8,6 +8,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from .models import (
     EdgeControlCommand,
+    EdgeLightCommand,
     EdgeMessage,
     MapState,
     Pose2D,
@@ -175,6 +176,17 @@ class RobotRegistry:
             ttl_ms=ttl_ms,
         )
         await self._send_edge(robot_id, "command.velocity", command.model_dump(mode="json"))
+        return command
+
+    async def route_light(self, robot_id: str, socket: WebSocket, *, on: bool) -> EdgeLightCommand:
+        async with self._lock:
+            if self._controllers.get(robot_id) is not socket:
+                raise ControlUnavailableError("control lease is not acquired")
+            status = self._state(robot_id).status
+            if not getattr(status, "headlight_available", False):
+                raise ControlUnavailableError("robot does not support headlights")
+        command = EdgeLightCommand(command_id=uuid4().hex, on=on)
+        await self._send_edge(robot_id, "command.light", command.model_dump(mode="json"))
         return command
 
     async def stop_control(
